@@ -1,0 +1,308 @@
+var http = require('https')
+
+/**
+ * Search the Skill and store in the session and prepares the speech to reply to the user.
+ */
+function searchSkills(intent, session, callback) {
+    const cardTitle = intent.name;
+    let repromptText = '';
+    let sessionAttributes = {};
+    const shouldEndSession = false;
+    let speechOutput = '';
+    var skill = intent.slots.search.value;
+console.log("searchSkills 13: "+ skill);
+if (skill) {
+        skill= skill.replace(/ /g, "%20");
+        console.log("searchSkills 16: "+ skill);
+        var result = "";
+    var options = {
+                  "method": "GET",
+                  "hostname": "dhdemo.ebsco.healthcare",
+                  "port": null,
+                  "path": "/api/dynamichealthedge/dynamichealthedge/search?q="+skill,
+                  "headers": {
+                    "authorization": "Basic ZHluYW1pYzpoZWFsdGg=",
+                    "cache-control": "no-cache",
+                    "postman-token": "f685c11a-5491-b773-9760-3025fafad95b"
+                  }
+                };
+                
+                var req = http.request(options, function (res) {
+                  var chunks = [];
+                
+                  res.on("data", function (chunk) {
+                    chunks.push(chunk);
+                  });
+                
+                  res.on("end", function () {
+                    var body = Buffer.concat(chunks);
+                    var field = JSON.parse(body);
+                    console.log(body.toString());
+                    
+                     speechOutput= "Sorry, I could not find the search result for "+ skill.replace(/%20/g, " ") + ". Please try another search word";
+                     var counter = 1;
+                     var anNumbers= [];
+                     if(field.message.content.allResults[0]){
+                         for (i = 0; i < 5; i++) { 
+                        result += " Title " + counter + " is " + field.message.content.allResults[i].title+". ";
+                        anNumbers.push(field.message.content.allResults[i].slug);
+                        counter ++;
+                    }
+                    console.log("Session attibutes body: "+ JSON.stringify(field.message.content.allResults[0].title));
+                    //callerrorFunction();
+                    if(field){
+                    sessionAttributes = JSON.parse("{\"annumbers\": \""+anNumbers+"\"}");    
+                    }
+                    else{
+                        sessionAttributes = "No attribute data";
+                    }
+                    speechOutput = "Here are 5 results for your search term "+ skill.replace(/%20/g, " ")+".";
+                    speechOutput += result;
+                    speechOutput += ". Please say numbers from 1 to 5 to select skill";
+                        callback(sessionAttributes,
+                     buildSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+                    
+                     }
+                     else{
+                         sessionAttributes = session.attributes;
+                         callback(sessionAttributes,
+                     buildSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+                     }
+                    
+                  });
+                });
+                
+                req.end();
+}
+        
+}
+
+function buildResponse(sessionAttributes, speechletResponse) {
+    console.log("Session attributes are: "+ JSON.stringify(sessionAttributes));
+    return {
+        version: '1.0',
+        sessionAttributes,
+        response: speechletResponse,
+    };
+}
+
+
+/**
+ * Read the skill in the session and prepares the speech to reply to the user.
+ */
+function readSkills(intent, session, callback) {
+    const cardTitle = intent.name;
+    console.log("Inside readSkills");
+    var searchNumber = intent.slots.searchNumber.value;
+    let repromptText = '';
+    let sessionAttributes = {};
+    const shouldEndSession = false;
+    
+    console.log("Read Skill Search number is "+ searchNumber);
+    if(JSON.stringify(session.attributes) === JSON.stringify({})){
+         let speechOutput = "You do not have search results. Please ask for search query.'  ";
+         sessionAttributes = session.attributes;
+         callback(sessionAttributes,
+         buildSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+    }
+    else if(isNaN(searchNumber)){
+       let speechOutput = "The input argument is not a number. Please try again.";
+       sessionAttributes = session.attributes;
+         callback(sessionAttributes,
+         buildSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+    }
+    else if(searchNumber<1 || searchNumber>5){
+        let speechOutput = "The input number is not between 1 and 5. Please try again.";
+       sessionAttributes = session.attributes;
+         callback(sessionAttributes,
+         buildSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+    }
+    else{
+    var res = session.attributes.annumbers.split(",");
+    // let speechOutput = "Read Skill is not implemented yet for number "+ searchNumber;
+    // let speechOutput = JSON.stringify(res[searchNumber-1]);
+    let speechOutput = '';
+    
+    sessionAttributes = session.attributes;
+
+
+// var http = require("https");
+var options = {
+  "method": "GET",
+  "hostname": "dhdemo.ebsco.healthcare",
+  "port": null,
+  "path": "/api/dynamichealthedge/dynamichealthedge/skill/"+res[searchNumber-1],
+  "headers": {
+    "authorization": "Basic ZHluYW1pYzpoZWFsdGg=",
+    "cache-control": "no-cache",
+    "postman-token": "3cb0756f-5cf5-33c5-a2d5-decdb502e061"
+  }
+};
+
+var req = http.request(options, function (res) {
+  var chunks = [];
+
+  res.on("data", function (chunk) {
+    chunks.push(chunk);
+  });
+
+  res.on("end", function () {
+    var body = Buffer.concat(chunks);
+    console.log(body.toString());
+    var field = JSON.parse(body);
+    
+    
+        speechOutput = field.message.content.guidecontent[0].data;
+        speechOutput = speechOutput.replace(/<(?:.|\n)*?>/gm, '');
+       console.log("HTML Response is: "+speechOutput ); 
+       
+        
+    callback(sessionAttributes,
+         buildSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+  });
+});
+
+req.end();
+
+}
+        
+    }// else
+
+function handleSessionEndRequest(callback) {
+    const cardTitle = 'Session Ended';
+    const speechOutput = 'Thank you for trying the Dynamic Health. Have a nice day!';
+    // Setting this to true ends the session and exits the skill.
+    const shouldEndSession = true;
+
+    callback({}, buildSpeechletResponse(cardTitle, speechOutput, null, shouldEndSession));
+}
+
+/**
+ * Called when the user specifies an intent for this skill.
+ */
+function onIntent(intentRequest, session, callback) {
+    //console.log("OnIntent user request: "+ intentRequest.intent.slots.search.value);
+    console.log(`onIntent requestId=${intentRequest.requestId}, sessionId=${session.sessionId}`);
+    //console.log(`onIntent searchnumber=${JSON.stringify(intentRequest.intent.slots.searchNumber.value)}`);
+    //console.log(`onIntent intentName=${JSON.stringify(intentRequest.intent.name)}`);
+
+    const intent = intentRequest.intent;
+    const intentName = intentRequest.intent.name;
+
+    // Dispatch to your skill's intent handlers
+    if (intentName === 'SearchIntent') {
+        console.log("SearchIntent");
+        searchSkills(intent, session, callback);
+    } else if (intentName === 'SearchNumberIntent') {
+        console.log("Search IntentNumber");
+        readSkills(intent, session, callback);
+    } else if (intentName === 'AMAZON.HelpIntent') {
+        getWelcomeResponse(callback);
+    } else if (intentName === 'AMAZON.StopIntent' || intentName === 'AMAZON.CancelIntent') {
+        handleSessionEndRequest(callback);
+    } else {
+        throw new Error('Invalid intent');
+    }
+}
+
+
+function getWelcomeResponse(callback) {
+    // If we wanted to initialize the session to have some attributes we could add those here.
+    const sessionAttributes = {};
+    const cardTitle = 'Welcome';
+    const speechOutput = 'Welcome to the Dynamic Health Alexa Skills. ' +
+        'Please ask me a skill to search.';
+    
+    // If the user either does not reply to the welcome message or says something that is not
+    // understood, they will be prompted again with this text.
+    const repromptText = 'Sorry, I did not understand. Please ask me a skill to search. ';
+    const shouldEndSession = false;
+
+    callback(sessionAttributes,
+        buildSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+}
+
+/**
+ * Called when the user launches the skill without specifying what they want.
+ */
+function onLaunch(launchRequest, session, callback) {
+    console.log(`onLaunch requestId=${launchRequest.requestId}, sessionId=${session.sessionId}`);
+
+    // Dispatch to your skill's launch.
+    getWelcomeResponse(callback);
+}
+
+exports.handler = (event, context, callback) => {
+
+  try {
+
+    if (event.session.new) {
+      // New Session
+      console.log("NEW SESSION")
+    }
+
+    switch (event.request.type) {
+
+      case "LaunchRequest":
+        onLaunch(event.request,
+                event.session,
+                (sessionAttributes, speechletResponse) => {
+                    callback(null, buildResponse(sessionAttributes, speechletResponse));
+                });
+        break;
+
+      case "IntentRequest":
+        console.log("Intent Request is: "+`INTENT REQUEST`);
+       // console.log("Alexa request is: "+ event.request.intent.slots.search.value);
+          onIntent(event.request,
+                event.session,
+                (sessionAttributes, speechletResponse) => {
+                    callback(null, buildResponse(sessionAttributes, speechletResponse));
+                });
+        break;
+
+      case "SessionEndedRequest":
+        // Session Ended Request
+        console.log(`SESSION ENDED REQUEST`);
+        break;
+
+      default:
+        context.fail(`INVALID REQUEST TYPE: ${event.request.type}`)
+
+    }
+
+  } catch(error) { context.fail(`Exception: ${error}`) }
+
+}
+
+// Helpers
+function buildSpeechletResponse(title, output, repromptText, shouldEndSession) {
+    return {
+        outputSpeech: {
+            type: 'PlainText',
+            text: output,
+        },
+        card: {
+            type: 'Simple',
+            title: `${title}`,
+            content: `${output}`,
+        },
+        reprompt: {
+            outputSpeech: {
+                type: 'PlainText',
+                text: repromptText,
+            },
+        },
+        shouldEndSession,
+    };
+}
+
+generateResponse = (speechletResponse, sessionAttributes) => {
+
+  return {
+    version: "1.0",
+    sessionAttributes: sessionAttributes,
+    response: speechletResponse
+  }
+
+}

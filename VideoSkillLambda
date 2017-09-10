@@ -1,0 +1,280 @@
+var http = require('https')
+
+/**
+ * This is the first method that will get called when the Skill is activated from Echo show
+ */
+exports.handler = (event, context, callback) => {
+
+  try {
+
+    if (event.session.new) {
+      // New Session
+      console.log("NEW SESSION")
+    }
+
+    switch (event.request.type) {
+
+      case "LaunchRequest":
+        onLaunch(event.request,
+                event.session,
+                (sessionAttributes, speechletResponse) => {
+                    callback(null, buildResponse(sessionAttributes, speechletResponse));
+                });
+        break;
+
+      case "IntentRequest":
+        console.log("Intent Request is: "+`INTENT REQUEST`);
+        console.log("Alexa request is: "+ event.request.intent.slots.search.value);
+          onIntent(event.request,
+                event.session,
+                (sessionAttributes, speechletResponse) => {
+                    callback(null, buildResponse(sessionAttributes, speechletResponse));
+                });
+        break;
+
+      case "SessionEndedRequest":
+        // Session Ended Request
+        console.log(`SESSION ENDED REQUEST`);
+        break;
+
+      default:
+        context.fail(`INVALID REQUEST TYPE: ${event.request.type}`)
+
+    }
+
+  } catch(error) { context.fail(`Exception: ${error}`) }
+
+}
+
+/**
+ * This method will get called on the start of session
+ */
+function onLaunch(launchRequest, session, callback) {
+    console.log(`onLaunch requestId=${launchRequest.requestId}, sessionId=${session.sessionId}`);
+
+    // Dispatch to your skill's launch.
+    getWelcomeResponse(callback);
+}
+
+/**
+ * This is the welcome response generated when the Echo skill is activated
+ */
+function getWelcomeResponse(callback) {
+    // If we wanted to initialize the session to have some attributes we could add those here.
+    const sessionAttributes = {};
+    const cardTitle = 'Welcome Message';
+    const speechOutput = 'Welcome to the Dynamic Health Alexa Skills. ' +
+        'Please ask me a skill to play video.';
+    
+    // If the user either does not reply to the welcome message or says something that is not
+    // understood, they will be prompted again with this text.
+    const repromptText = 'Sorry, I did not understand. Please ask me a skill to search by saying, what is heart attack';
+    const shouldEndSession = false;
+
+    callback(sessionAttributes,
+        buildWelcomeSpeechletResponse(cardTitle, speechOutput, repromptText, shouldEndSession));
+}
+
+/**
+ * User will then ask a question
+ * This method will identify the intent of User's question and will call eather search Intent or Display video intent.
+ */
+function onIntent(intentRequest, session, callback) {
+    //console.log("OnIntent user request: "+ intentRequest.intent.slots.search.value);
+    // console.log(`onIntent requestId=${intentRequest.requestId}, sessionId=${session.sessionId}`);
+    //console.log(`onIntent searchnumber=${JSON.stringify(intentRequest.intent.slots.searchNumber.value)}`);
+    //console.log(`onIntent intentName=${JSON.stringify(intentRequest.intent.name)}`);
+
+    const intent = intentRequest.intent;
+    const intentName = intentRequest.intent.name;
+
+    // Dispatch to your skill's intent handlers
+    if (intentName === 'SearchIntent') {
+        searchSkills(intent, session, callback);
+    } else if (intentName === 'AMAZON.HelpIntent') {
+        getWelcomeResponse(callback);
+    } else if (intentName === 'AMAZON.StopIntent' || intentName === 'AMAZON.CancelIntent') {
+        handleSessionEndRequest(callback);
+    } else {
+        throw new Error('Invalid intent');
+    }
+}
+
+/**
+ * This method searches the user request string and displays the videos 
+ */
+function searchSkills(intent, session, callback) {
+
+    const cardTitle = intent.name;
+    let repromptText = '';
+    let sessionAttributes = {};
+    const shouldEndSession = false;
+    let speechOutput = '';
+    var skill = intent.slots.search.value;
+    
+    if (skill) {
+        skill= skill.replace(" ", "%20");
+        var options = {
+                  "method": "GET",
+                  "hostname": "dhdemo.ebsco.healthcare",
+                  "port": null,
+                  "path": "/api/dynamichealthedge/dynamichealthedge/search?q="+skill,
+                  "headers": {
+                    "authorization": "Basic ZHluYW1pYzpoZWFsdGg=",
+                    "cache-control": "no-cache",
+                    "postman-token": "f685c11a-5491-b773-9760-3025fafad95b"
+                  }
+        };
+                
+        var req = http.request(options, function (res) {
+            var chunks = [];
+                
+            res.on("data", function (chunk) {
+                chunks.push(chunk);
+            });
+                
+            res.on("end", function () {
+                
+                var body = Buffer.concat(chunks);
+                var field = JSON.parse(body);
+                speechOutput= "Sorry, I could not find the search result for "+ skill+". Please try another search word";
+                var apiKeys= [];
+                var guid=[];
+
+                if(field.message.content.videoResults[0]){
+                    var videoResultsArray = field.message.content.videoResults.length;
+                    for (var i = 0; i < videoResultsArray; i++){
+                        var videoArray = field.message.content.videoResults[i].videos.length;
+                        for(var j = 0; j < videoArray; j++){
+                            apiKeys.push(field.message.content.videoResults[i].videos[j].video.apiKey);
+                            guid.push(field.message.content.videoResults[i].videos[j].video.guid);
+                            getVideoUrl(field.message.content.videoResults[i].videos[j].video.apiKey, field.message.content.videoResults[i].videos[j].video.guid, apiKeys, guid, callback);
+                        
+                        }
+                    }
+                    if(field){
+                    sessionAttributes = JSON.parse("{\"apiKeys\": \""+apiKeys+"\",\"guid\": \""+guid+"\"}");    
+                    }
+                    else{
+                        sessionAttributes = "No attribute data";
+                    }
+                }
+            });
+        });
+                
+        req.end();   
+    }
+}
+
+/**
+ * This function gets apiKey, guid and returns the video url
+ */
+function getVideoUrl(apiKey, guid, apiKeyArray, guidArray, callback){
+    
+        var sessionAttributes = [];
+       var options = {
+          "method": "GET",
+          "hostname": "api.widget.cx",
+          "port": null,
+          "path": "/v1/search?apikey="+apiKey+"&guid="+guid+"&format=json",
+          "headers": {
+            "cache-control": "no-cache"
+          }
+        };
+                    
+      var req = http.request(options, function (res) {
+      var chunks = [];
+    
+          res.on("data", function (chunk) {
+            chunks.push(chunk);
+          });
+        
+          res.on("end", function () {
+            var body = Buffer.concat(chunks);
+            var field = JSON.parse(body);
+            console.log("MediaFile: "+ JSON.stringify(field.Response.ResultSet.Results.CompleteResult.EpisodeMetaData.TranscodeMedia.MediaFile[0]["cached-media-url"]));
+        
+        var cardTitle = "Dynamic Health Video";
+        var repromptText = "";
+        const shouldEndSession = false;
+        var mediaJson = field.Response.ResultSet.Results.CompleteResult.EpisodeMetaData.TranscodeMedia.MediaFile[0]["cached-media-url"];
+        sessionAttributes = JSON.parse("{\"apiKeys\": \""+apiKeyArray+"\",\"guid\": \""+guidArray+"\"}");    
+                    
+            callback(sessionAttributes,
+                     buildSpeechletResponse(cardTitle, mediaJson, repromptText, shouldEndSession));
+                     
+          });
+        });
+    
+        req.end();  
+}
+
+
+// Following two methods are Helper methods
+
+
+/**
+ * This method builds the SpeechletResponse. It contains the directives and the video link that will be rendered by Echo Show
+ */
+function buildSpeechletResponse(title, output, repromptText, shouldEndSession) {
+     return {
+        directives: [
+            {
+                type: "VideoApp.Launch",
+                videoItem: {
+                    source: output,
+                    metadata: {
+                        title: 'DYNAMIC HEALTH',
+                        subtitle: "Video for dynamic Health"
+                    }
+                }
+            }
+        ]
+    };
+}
+
+/**
+ * This method is a standard response for Echo Show. It uses 'buildSpeechletResponse' to generate it's 'speechletResponse' parameter 
+ * This method is same as method above. I am not sure which one is being used (or both of them)
+ */
+function buildResponse(sessionAttributes, speechletResponse) {
+    return {
+        version: '1.0',
+        sessionAttributes,
+        response: speechletResponse,
+    };
+}
+
+function buildWelcomeSpeechletResponse(title, output, repromptText, shouldEndSession){
+        return {
+        outputSpeech: {
+            type: 'PlainText',
+            text: output,
+        },
+        card: {
+            type: 'Simple',
+            title: `SessionSpeechlet - ${title}`,
+            content: `SessionSpeechlet - ${output}`,
+        },
+        reprompt: {
+            outputSpeech: {
+                type: 'PlainText',
+                text: repromptText,
+            },
+        },
+        shouldEndSession,
+    };
+}
+
+/**
+ * This method will get called at the end of the session.
+ */
+function handleSessionEndRequest(callback) {
+    const cardTitle = 'Session Ended';
+    const speechOutput = 'Thank you for trying the Dynamic Health. Have a nice day!';
+    // Setting this to true ends the session and exits the skill.
+    const shouldEndSession = true;
+
+    callback({}, buildSpeechletResponse(cardTitle, speechOutput, null, shouldEndSession));
+}
+
